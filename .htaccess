@@ -1,0 +1,8 @@
+ErrorDocument 404 /404.html
+
+RewriteEngine On
+
+# Redirect requests without file extension to .php files
+RewriteCond %{REQUEST_FILENAME}.php -f
+RewriteRule ^([^/.]+)$ $1.php [L]
+

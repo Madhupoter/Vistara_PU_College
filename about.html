@@ -1,0 +1,383 @@
+<?php
+ini_set('display_errors', 1);
+ini_set('display_startup_errors', 1);
+error_reporting(E_ALL);
+
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\Exception;
+
+require '/home/u555246860/domains/sriraghavendracollege.com/public_html/PHPMailer/src/Exception.php';
+require '/home/u555246860/domains/sriraghavendracollege.com/public_html/PHPMailer/src/PHPMailer.php';
+require '/home/u555246860/domains/sriraghavendracollege.com/public_html/PHPMailer/src/SMTP.php';
+
+// Define configuration variables - consider moving these to a separate config file
+$smtp_host = 'mail.enternine.com';
+$smtp_port = 587;
+$smtp_username = 'sriraghavendracollege@enternine.com';  
+$smtp_password = 'Pharmacy_College@Banglore'; // Use environment variables or a secure config file instead
+$admin_email = 'sriraghavendracollege@enternine.com';
+$recaptcha_secret = "6LfozzArAAAAAJvqReHt-7Lp6VOVcm1qYgYe6xK-";
+
+// Log function for debugging
+function logMessage($message) {
+    error_log("[FORM PROCESSOR] " . $message);
+}
+
+// Check if form is submitted
+if ($_SERVER["REQUEST_METHOD"] == "POST") {
+    $recaptcha_verified = false;
+    
+    // Verify reCAPTCHA
+    if (isset($_POST['g-recaptcha-response'])) {
+        $recaptcha_response = $_POST['g-recaptcha-response'];
+        
+        // Make the verification request to Google using file_get_contents
+        $recaptcha_url = 'https://www.google.com/recaptcha/api/siteverify';
+        $recaptcha_data = [
+            'secret' => $recaptcha_secret,
+            'response' => $recaptcha_response,
+            'remoteip' => $_SERVER['REMOTE_ADDR']
+        ];
+        
+        $opts = [
+            'http' => [
+                'method' => 'POST',
+                'header' => 'Content-type: application/x-www-form-urlencoded',
+                'content' => http_build_query($recaptcha_data)
+            ]
+        ];
+        $context = stream_context_create($opts);
+        $recaptcha_result = @file_get_contents($recaptcha_url, false, $context);
+        
+        if ($recaptcha_result !== false) {
+            $recaptcha_json = json_decode($recaptcha_result);
+            
+            if ($recaptcha_json && $recaptcha_json->success) {
+                $recaptcha_verified = true;
+                logMessage("reCAPTCHA verification successful");
+            } else {
+                logMessage("reCAPTCHA verification failed: " . print_r($recaptcha_json, true));
+            }
+        } else {
+            logMessage("Could not connect to reCAPTCHA server");
+        }
+    } else {
+        logMessage("reCAPTCHA response not found in form submission");
+    }
+    
+    // For production, you might want to enforce reCAPTCHA
+    if (!$recaptcha_verified) {
+        header("Location: form.php?error=captcha");
+        exit();
+    }
+    
+    // Get form data and sanitize
+    $name     = filter_input(INPUT_POST, 'name', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    $email    = filter_input(INPUT_POST, 'email', FILTER_SANITIZE_EMAIL);
+    $phone    = filter_input(INPUT_POST, 'phone', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    $address  = filter_input(INPUT_POST, 'address', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    $pincode  = filter_input(INPUT_POST, 'pincode', FILTER_SANITIZE_NUMBER_INT);
+    $state    = filter_input(INPUT_POST, 'state', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    $course   = filter_input(INPUT_POST, 'course', FILTER_SANITIZE_FULL_SPECIAL_CHARS);
+    
+    // Validate required fields
+    $errors = [];
+    
+    if (empty($name)) {
+        $errors[] = "Name is required";
+    }
+    
+    if (empty($email) || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+        $errors[] = "Valid email is required";
+    }
+    
+    if (empty($phone)) {
+        $errors[] = "Phone number is required";
+    }
+    
+    if (empty($course)) {
+        $errors[] = "Course selection is required";
+    }
+    
+    // If there are validation errors, redirect back to form
+    if (!empty($errors)) {
+        $error_string = implode(",", $errors);
+        header("Location: form.php?error=" . urlencode($error_string));
+        exit();
+    }
+    
+    // Create admin email message
+    $admin_message = "
+    <html>
+    <head>
+        <title>New Course Application</title>
+        <style>
+            body { font-family: Arial, sans-serif; }
+            .container { max-width: 600px; margin: 0 auto; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+            th { background-color: #f2f2f2; }
+        </style>
+    </head>
+    <body>
+        <div class='container'>
+            <h2>New CApplication Received</h2>
+            <p>The following student has applied for admission:</p>
+            
+            <table>
+                <tr>
+                    <th>Full Name</th>
+                    <td>" . htmlspecialchars($name) . "</td>
+                </tr>
+                <tr>
+                    <th>Email</th>
+                    <td>" . htmlspecialchars($email) . "</td>
+                </tr>
+                <tr>
+                    <th>Phone</th>
+                    <td>" . htmlspecialchars($phone) . "</td>
+                </tr>
+                <tr>
+                    <th>Address</th>
+                    <td>" . htmlspecialchars($address) . "</td>
+                </tr>
+                <tr>
+                    <th>Pincode</th>
+                    <td>" . htmlspecialchars($pincode) . "</td>
+                </tr>
+                <tr>
+                    <th>State</th>
+                    <td>" . htmlspecialchars($state) . "</td>
+                </tr>
+                <tr>
+                    <th>Course</th>
+                    <td>" . htmlspecialchars($course) . "</td>
+                </tr>
+            </table>
+            
+            <p>Please process this application at your earliest convenience.</p>
+        </div>
+    </body>
+    </html>
+    ";
+    
+    // Create autoreply message
+    $autoreply_message = "
+    <html>
+    <head>
+        <title>Application Confirmation</title>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; }
+            .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            .header { background-color: #ff5722; color: white; padding: 15px; text-align: center; }
+            .thank-you { background-color: #f8f9fa; padding: 15px; text-align: center; font-size: 18px; font-weight: bold; margin: 20px 0; border-left: 4px solid #ff5722; }
+            .content { padding: 20px; border: 1px solid #ddd; }
+            .footer { font-size: 12px; text-align: center; margin-top: 20px; color: #777; }
+        </style>
+    </head>
+    <body>
+        <div class='container'>
+            <div class='header'>
+                <h2>Application Received</h2>
+            </div>
+            <div class='content'>
+                <div class='thank-you'>
+                    THANK YOU for submitting your application to Sri Raghavendra College!
+                </div>
+                
+                <p>Dear " . htmlspecialchars($name) . ",</p>
+                
+                <p>We sincerely appreciate your interest in our institution. We have successfully received your application for the <strong>" . htmlspecialchars($course) . "</strong> program.</p>
+                 
+                <p>Our admissions team will carefully review your application and contact you soon with the next steps. If you have any questions in the meantime, please feel free to contact our admissions office.</p>
+                
+                <p>We look forward to potentially welcoming you to our campus!</p>
+                
+                <p>Best regards,<br>
+                Sri Raghavendra College Of Pharmacy</p>
+            </div>
+            <div class='footer'>
+                <p>This is an automated message. Please do not reply to this email.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    ";
+    
+    try {
+        // Configure PHPMailer for both emails
+        $common_mail_settings = function($mail) use ($smtp_host, $smtp_port, $smtp_username, $smtp_password) {
+            $mail->isSMTP();
+            $mail->Host       = $smtp_host;
+            $mail->SMTPAuth   = true;
+            $mail->Username   = $smtp_username;
+            $mail->Password   = $smtp_password;
+            $mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->Port       = $smtp_port;
+            
+            // Set debug level - Set to 0 in production
+            $mail->SMTPDebug = 0;
+            
+            return $mail;
+        };
+        
+        // ADMIN EMAIL
+        $admin_mail = new PHPMailer(true);
+        $admin_mail = $common_mail_settings($admin_mail);
+        
+        // Admin email recipients
+        $admin_mail->setFrom($smtp_username, 'New Application');
+        $admin_mail->addAddress($admin_email, 'Admin');
+        $admin_mail->addReplyTo($email, $name);
+        
+        // Admin email content
+        $admin_mail->isHTML(true);
+        $admin_mail->Subject = "New Application: " . $name . " for " . $course;
+        $admin_mail->Body    = $admin_message;
+        $admin_mail->AltBody = strip_tags($admin_message);
+        
+        $admin_mail_result = $admin_mail->send();
+        logMessage("Admin email sent: " . ($admin_mail_result ? "SUCCESS" : "FAILED"));
+        
+        // AUTOREPLY EMAIL - Only if admin email was successful
+        if ($admin_mail_result) {
+            $autoreply_mail = new PHPMailer(true);
+            $autoreply_mail = $common_mail_settings($autoreply_mail);
+            
+            // Auto-reply recipients
+            $autoreply_mail->setFrom($smtp_username, 'Sri Raghavendra College Of Pharmacy');
+            $autoreply_mail->addAddress($email, $name);
+            
+            // Auto-reply content
+            $autoreply_mail->isHTML(true);
+            $autoreply_mail->Subject = "Thank You - Your " . $course . " Application Received";
+            $autoreply_mail->Body    = $autoreply_message;
+            $autoreply_mail->AltBody = strip_tags($autoreply_message);
+            
+            $autoreply_result = $autoreply_mail->send();
+            logMessage("Auto-reply email sent: " . ($autoreply_result ? "SUCCESS" : "FAILED"));
+            
+            if (!$autoreply_result) {
+                logMessage("Auto-reply mail error: " . $autoreply_mail->ErrorInfo);
+                // Don't redirect to error page - still consider the submission successful
+            }
+        }
+        
+        // Redirect to success page
+        echo <<<HTML
+        <div id="successModal" class="modal-overlay">
+          <div class="modal-content">
+            <div class="checkmark-circle">
+              <div class="checkmark"></div>
+            </div>
+            <h2>Thank you for Enquiry!</h2>
+            <p>Your enquiry has been received. We will get back to you soon.</p>
+            <a href="./" class="back-button">Back to Home</a>
+          </div>
+        </div>
+        
+        <style>
+          .modal-overlay {
+            position: fixed;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.6);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 9999;
+            animation: fadeIn 0.4s ease;
+          }
+        
+          .modal-content {
+            background: white;
+            border-radius: 16px;
+            padding: 40px 20px;
+            text-align: center;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+            animation: slideUp 0.4s ease;
+            max-width: 400px;
+            width: 90%;
+          }
+        
+          .checkmark-circle {
+            width: 100px;
+            height: 100px;
+            border-radius: 50%;
+            display: inline-block;
+            border: 4px solid #4BB543;
+            position: relative;
+            margin-bottom: 20px;
+            animation: popIn 0.5s ease-out forwards;
+          }
+        
+          .checkmark {
+            transform: rotate(45deg);
+            height: 50px;
+            width: 25px;
+            border-bottom: 5px solid #4BB543;
+            border-right: 5px solid #4BB543;
+            position: absolute;
+            top: 22px;
+            left: 34px;
+            animation: draw 0.6s ease-out 0.2s forwards;
+            opacity: 0;
+          }
+        
+          h2 {
+            color: #333;
+            margin: 0 0 10px;
+          }
+        
+          p {
+            color: #555;
+            margin-bottom: 20px;
+          }
+        
+          .back-button {
+            text-decoration: none;
+            display: inline-block;
+            padding: 10px 20px;
+            background: #4BB543;
+            color: white;
+            border-radius: 8px;
+            transition: background 0.3s;
+          }
+        
+          .back-button:hover {
+            background: #3da43c;
+          }
+        
+          @keyframes popIn {
+            0% { transform: scale(0); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+          }
+        
+          @keyframes draw {
+            to { opacity: 1; }
+          }
+        
+          @keyframes slideUp {
+            from { transform: translateY(40px); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+          }
+        
+          @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+          }
+        </style>
+        HTML; 
+        exit();
+        
+    } catch (Exception $e) {
+        logMessage("Error sending emails: " . $e->getMessage());
+        header("Location: form.php?error=mail_error");
+        exit();
+    }
+} else {
+    // If not a POST request, redirect to the form page
+    header("Location: index.php");
+    exit();
+}
+?>
