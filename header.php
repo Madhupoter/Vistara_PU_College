@@ -299,7 +299,7 @@
 
                     <!-- Cloudflare Turnstile -->
                     <div class="mb-3">
-                        <div class="cf-turnstile" data-sitekey="0x4AAAAAABbRHgP-0Nk6kW6f"></div>
+                        <div class="cf-turnstile" data-sitekey="AddYourkey"></div>
                     </div>
 
                     <div class="text-center">
@@ -312,4 +312,5 @@
             </div>
         </div>
     </div>
+
 </div>
